@@ -1,10 +1,13 @@
-function differentiate(f, args...)
-    #println(args)
+using IRTools: var, func
+
+function gradient_1(f, args...)
     ir = IRTools.@code_ir f(args...)
     len = length(ir.defs)
     
+	# this version works only for a single block
     block = IRTools.blocks(ir)[1]
     
+	# this version works only for a single return value
     return_var = IRTools.returnvalue(block)
     
     arg_count = ir.meta.nargs
@@ -18,79 +21,54 @@ function differentiate(f, args...)
     x_to_gx[return_var] = one
     
     for assignee in len:-1:(arg_count+1)
-        try
-            idx = length(ir)
-            println("$(assignee) $(ir[var(assignee)]) $(idx)")
+		idx = length(ir)
+		# println("$(assignee) $(ir[var(assignee)]) $(idx)")
 
-            ex = ir[var(assignee)].expr
-            if ex.head == :call
-                fn = string(ex.args[1])
-                if fn == "Main.:+"
-                    println("add")
-                    # where %6 is assignee
-                     # Take %6 = %4 + %5 and convert it into
-                    # g4 += g6
-                    # g5 += g6
-                   
-                    # where is the adjoint of the assignee?
-                    g_assignee = x_to_gx[var(assignee)]
-                    
-                    # either get the variable that we've accumulated adjoints into so far, 
-                    # or if it doesn't exist, initialize it to zero.
-                    g_arg1_old = get(x_to_gx, ex.args[2], IRTools.push!(ir, :(0)))
-                    g_arg2_old = get(x_to_gx, ex.args[3], IRTools.push!(ir, :(0)))
-                    
-                    # finally, add the new bit (g_assignee) and accumulate it into the new variable.
-                    g_arg1_new = IRTools.push!(ir, :($(g_arg1_old) + $(g_assignee)))
-                    g_arg2_new = IRTools.push!(ir, :($(g_arg2_old) + $(g_assignee)))
-                    
-                    x_to_gx[ex.args[2]] = g_arg1_new
-                    x_to_gx[ex.args[3]] = g_arg2_new                    
-                elseif fn == "Main.:*"
-                    # Take %6 = %4 * %5 and convert it into
-                    # g4 += g6 * %5
-                    # g5 += g6 * %4
-                    
-                    g_assignee = x_to_gx[var(assignee)]
-                    
-                    # either get the variable that we've accumulated adjoints into so far, 
-                    # or if it doesn't exist, initialize it to zero.
-                    g_arg1_old = get(x_to_gx, ex.args[2], IRTools.push!(ir, :(0)))
-                    g_arg2_old = get(x_to_gx, ex.args[3], IRTools.push!(ir, :(0)))
-                    
-                    g_arg1_new = IRTools.push!(ir, :($(g_arg1_old) + $(g_assignee) * $(ex.args[3])))
-                    g_arg2_new = IRTools.push!(ir, :($(g_arg2_old) + $(g_assignee) * $(ex.args[2])))
-                    
-                    x_to_gx[ex.args[2]] = g_arg1_new
-                    x_to_gx[ex.args[3]] = g_arg2_new                    
-                    #println("add")
-                elseif fn == "Main.sin"
-                    g_assignee = x_to_gx[var(assignee)]
-                    
-                    # either get the variable that we've accumulated adjoints into so far, 
-                    # or if it doesn't exist, initialize it to zero.
-                    g_arg1_old = get(x_to_gx, ex.args[2], IRTools.push!(ir, :(0)))
-                    
-                    g_arg1_new = IRTools.push!(ir, :($(g_arg1_old) + $(g_assignee) * cos($(ex.args[2]))))
-                    
-                    x_to_gx[ex.args[2]] = g_arg1_new
+		ex = ir[var(assignee)].expr
+		if ex.head == :call
+			fn = string(ex.args[1])
+			if fn == "Main.:+"
+				# where %6 is assignee
+				# Take %6 = %4 + %5 and convert it into
+				# g4 += g6
+				# g5 += g6
+				
+				# where is the adjoint of the assignee?
+				g_assignee = x_to_gx[var(assignee)]
+				
+				# either get the variable that we've accumulated adjoints into so far, 
+				# or if it doesn't exist, initialize it to zero.
+				g_arg1_old = get(x_to_gx, ex.args[2], IRTools.push!(ir, :(0)))
+				g_arg2_old = get(x_to_gx, ex.args[3], IRTools.push!(ir, :(0)))
+				
+				# finally, add the new bit (g_assignee) and accumulate it into the new variable.
+				g_arg1_new = IRTools.push!(ir, :($(g_arg1_old) + $(g_assignee)))
+				g_arg2_new = IRTools.push!(ir, :($(g_arg2_old) + $(g_assignee)))
+				
+				x_to_gx[ex.args[2]] = g_arg1_new
+				x_to_gx[ex.args[3]] = g_arg2_new                    
+			elseif fn == "Main.:*"
+				g_assignee = x_to_gx[var(assignee)]
+				
+				g_arg1_old = get(x_to_gx, ex.args[2], IRTools.push!(ir, :(0)))
+				g_arg2_old = get(x_to_gx, ex.args[3], IRTools.push!(ir, :(0)))
+				
+				g_arg1_new = IRTools.push!(ir, :($(g_arg1_old) + $(g_assignee) * $(ex.args[3])))
+				g_arg2_new = IRTools.push!(ir, :($(g_arg2_old) + $(g_assignee) * $(ex.args[2])))
+				
+				x_to_gx[ex.args[2]] = g_arg1_new
+				x_to_gx[ex.args[3]] = g_arg2_new                    
+			elseif fn == "Main.sin"
+				g_assignee = x_to_gx[var(assignee)]
 
-                    #println("add")
-                end
-            end
-            #IRTools.insertafter!(ir, var(idx + 1), :(println("Hello, ", $idx)))
-            #IRTools.push!(ir, :(println("Hello, ", $idx)))
-            #sv = var(s)
-            #IRTools.push!(ir, :(sv * sv))
-        catch a
-            rethrow(a)
-            println("Broke on ", assignee)
-            break
-        end
+				g_arg1_old = get(x_to_gx, ex.args[2], IRTools.push!(ir, :(0)))
+				
+				g_arg1_new = IRTools.push!(ir, :($(g_arg1_old) + $(g_assignee) * cos($(ex.args[2]))))
+				
+				x_to_gx[ex.args[2]] = g_arg1_new
+			end
+		end
     end
-    
-    #vec_statement = IRTools.Inner.Statement(:(Base.vect()), Any, 1)
-    #out_list_var = IRTools.push!(ir, vec_statement)
     
     outs = [return_var]
     
@@ -101,9 +79,7 @@ function differentiate(f, args...)
     #    IRTools.push!(ir, :(Main.push!($(out_list_var), $(g_arg))))
     end
     
-    println(x_to_gx)
-    
-    #out_var = IRTools.push!(ir, :(($(outs...,))))
+    #println(x_to_gx)
     
     out_var = IRTools.push!(ir, nothing)
     # needed to bypass an internal bug with using tuples directly. Don't ask how long it took to figure this out.
@@ -113,14 +89,19 @@ function differentiate(f, args...)
     
     IRTools.return!(ir, out_var)
     #IRTools.return!(ir, out_list_var)
+
+	raw_compiled = func(ir)
     
-    print(ir)
+	compiled = (args...) -> raw_compiled(nothing, args...)
+
+	#result = _compiled(args...)
+
+	#return func(ir)(nothing, args...)
+
+	result = Base.invokelatest(compiled, args...)
+
+	return result[2:length(result)]
+	#return result
     
-    compiled = func(ir)
-    
-    return compiled
-    
-    compiled(nothing, args...)
-    
-    #print(ir)
+    #return compiled
 end
