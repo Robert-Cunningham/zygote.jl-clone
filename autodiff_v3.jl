@@ -1,6 +1,7 @@
 using IRTools: var, func
 
-function gradient_2(f, args...)
+function gradient_3(f, args...)
+    #Core.println("Calling gradient on", f, args)
     ir = IRTools.@code_ir f(args...)
     len = length(ir.defs)
     
@@ -26,8 +27,12 @@ function gradient_2(f, args...)
             g_assignee = x_to_gx[var(assignee)]
             for (i, a) in Iterators.enumerate(ex.args[2:length(ex.args)])
                 g_old = get(x_to_gx, a, IRTools.push!(ir, :(0)))
+                #Core.println("ex", ex)
 				factor = derivative_rule(eval(ex.args[1]), ex.args[2: length(ex.args)], i)
-                g_new = IRTools.push!(ir, :($(g_old) + $(g_assignee) * $(factor)))
+                #Core.println("factor", factor)
+                g_new = IRTools.push!(ir, :($(g_old) + $(g_assignee) * 
+                    derivative_rule($(eval(getproperty(ex, :args)[1])), $(getproperty(ex, :args)[2: length(getproperty(ex, :args))]), $(i))
+                ))
                 
                 x_to_gx[a] = g_new
  			end
@@ -47,6 +52,9 @@ function gradient_2(f, args...)
     ir[out_var] = IRTools.Inner.Statement(:($(GlobalRef(Core, :tuple))($(outs...),)))
     
     IRTools.return!(ir, out_var)
+
+    #Core.println("finished transformation")
+    #println(ir)
 
 	result = Base.invokelatest(func(ir), nothing, args...)
 
@@ -75,3 +83,12 @@ function derivative_rule(::typeof(*), args, i)
         return args[1]
     end
 end
+
+function derivative_rule(unknown_function, args, i)
+    #Core.println("fell through on", unknown_function, args)
+    return gradient_3(unknown_function, args...)[i]
+    # return derivative_rule_gen(unknown_function, args, i)
+end
+
+#@generated function derivative_rule_gen(f, args, i)
+#end
